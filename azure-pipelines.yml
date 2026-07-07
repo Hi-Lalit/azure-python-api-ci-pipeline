@@ -21,3 +21,7 @@ steps:
 - script: |
     python -m py_compile app.py
   displayName: 'Compile Python code'
+
+- script: |
+    python app.py
+  displayName: 'Run application'
