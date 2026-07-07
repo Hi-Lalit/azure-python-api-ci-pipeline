@@ -1,0 +1,10 @@
+trigger:
+- feature
+
+pool: 
+  vmImage: 'ubuntu-20.04'
+
+steps:
+- script: |
+    echo "Hello, World!"
+  displayName: 'Run a one-line script'
