@@ -1,14 +1,13 @@
 trigger:
 - feature
 
-pool: 
-  vmImage: 'ubuntu-22.04'
+pool:
+  vmImage: ubuntu-22.04
 
 variables:
   pythonVersion: '3.12'
 
 steps:
-
 - task: UsePythonVersion@0
   inputs:
     versionSpec: '$(pythonVersion)'
@@ -16,12 +15,16 @@ steps:
 - script: |
     python -m pip install --upgrade pip
     pip install -r requirements.txt
-  displayName: 'Install dependencies'
+  displayName: Install dependencies
 
 - script: |
     python -m py_compile app.py
-  displayName: 'Compile Python code'
+  displayName: Compile Python code
 
 - script: |
-    python app.py
-  displayName: 'Run application'
+    python app.py &
+    APP_PID=$!
+    sleep 5
+    curl --fail http://127.0.0.1:5000
+    kill $APP_PID
+  displayName: Verify application starts
