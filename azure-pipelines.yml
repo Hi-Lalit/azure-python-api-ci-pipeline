@@ -1,30 +1,93 @@
 trigger:
-- feature
+  branches:
+    include:      
+      - feature
 
 pool:
   vmImage: ubuntu-22.04
 
 variables:
   pythonVersion: '3.12'
+  # Azure Container Registry (ACR) login server — update if not *.azurecr.io
+  acrName: 'apacheapp'
+  acrLoginServer: 'apacheapp.azurecr.io'
+  imageRepository: 'flask-app'
+  tag: '$(Build.BuildId)'
 
-steps:
-- task: UsePythonVersion@0
-  inputs:
-    versionSpec: '$(pythonVersion)'
+stages:
 
-- script: |
-    python -m pip install --upgrade pip
-    pip install -r requirements.txt
-  displayName: Install dependencies
+# ---------------------------------------------------------------------------
+# CI: install deps, sanity-compile, and test the REAL architecture
+# (Flask + Apache reverse proxy, via docker compose) rather than
+# running app.py directly.
+# ---------------------------------------------------------------------------
+- stage: Build_And_Test
+  displayName: 'Build & Test'
+  jobs:
+  - job: Build
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '$(pythonVersion)'
 
-- script: |
-    python -m py_compile app.py
-  displayName: Compile Python code
+    - script: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      displayName: 'Install dependencies'
 
-- script: |
-    python app.py &
-    APP_PID=$!
-    sleep 5
-    curl --fail http://127.0.0.1:5000
-    kill $APP_PID
-  displayName: Verify application starts
+    - script: |
+        python -m py_compile app.py
+      displayName: 'Compile Python code'
+
+    - script: |
+        docker compose build
+      displayName: 'Build Docker images (flask + apache)'
+
+    - script: |
+        docker compose up -d
+        sleep 5
+        # Hit Apache (port 8080), not Flask directly — this proves the
+        # reverse proxy config actually works end-to-end.
+        curl --fail http://127.0.0.1:8080
+        docker compose down
+      displayName: 'Integration test via docker compose (Apache -> Flask)'
+
+# ---------------------------------------------------------------------------
+# CD: push the Flask image to ACR, then deploy.
+# Only runs on main, and only if Build_And_Test succeeded.
+# ---------------------------------------------------------------------------
+- stage: Push_Image
+  displayName: 'Push Image to ACR'
+  dependsOn: Build_And_Test
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - job: PushToACR
+    steps:
+    - task: Docker@2
+      displayName: 'Build and push flask image to ACR'
+      inputs:
+        containerRegistry: 'apacheapp-acr-connection'   # <-- create this service connection in Azure DevOps: Project Settings > Service connections > Docker Registry (or ARM) > point at "apacheapp" ACR
+        repository: '$(imageRepository)'
+        command: 'buildAndPush'
+        Dockerfile: '**/Dockerfile'
+        tags: |
+          $(tag)
+          latest
+
+- stage: Deploy
+  displayName: 'Deploy to Azure Web App for Containers'
+  dependsOn: Push_Image
+  condition: succeeded()
+  jobs:
+  - deployment: DeployWebApp
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureWebAppContainer@1
+            displayName: 'Deploy image to Web App'
+            inputs:
+              azureSubscription: 'apacheapp-azure-connection'  # <-- create this ARM service connection in Azure DevOps
+              appName: 'apacheapp-webapp'                      # <-- update to your actual Web App name
+              containers: '$(acrLoginServer)/$(imageRepository):$(tag)'
