@@ -26,40 +26,24 @@ stages:
 
     steps:
 
-    # --------------------------------
-    # Install Python
-    # --------------------------------
     - task: UsePythonVersion@0
       displayName: 'Use Python $(pythonVersion)'
       inputs:
         versionSpec: '$(pythonVersion)'
 
-    # --------------------------------
-    # Install dependencies
-    # --------------------------------
     - script: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
       displayName: 'Install dependencies'
 
-    # --------------------------------
-    # Compile Python code
-    # --------------------------------
     - script: |
         python -m py_compile app.py
       displayName: 'Compile Python code'
 
-    # --------------------------------
-    # Build Docker Compose images
-    # --------------------------------
     - script: |
         docker compose build
       displayName: 'Build Docker images'
 
-    # --------------------------------
-    # Integration test
-    # Apache -> Flask
-    # --------------------------------
     - script: |
         set -e
 
@@ -76,9 +60,6 @@ stages:
         docker compose down
       displayName: 'Integration test via Docker Compose'
 
-    # --------------------------------
-    # Cleanup containers if test fails
-    # --------------------------------
     - script: |
         docker compose down || true
       displayName: 'Cleanup Docker containers'
@@ -105,7 +86,7 @@ stages:
       displayName: 'Build and Push Flask Image to ACR'
 
       inputs:
-        containerRegistry: 'apacheapp-acr-connection'
+        containerRegistry: 'apacheapp-azure-connection'
         repository: '$(imageRepository)'
         command: 'buildAndPush'
         Dockerfile: '**/Dockerfile'
@@ -143,6 +124,6 @@ stages:
             displayName: 'Deploy Image to Web App'
 
             inputs:
-              azureSubscription: 'apacheapp-azure-connection'
+              azureSubscription: 'apacheapp-arm-connection'
               appName: 'apacheapp-webapp'
               containers: '$(acrLoginServer)/$(imageRepository):$(tag)'
