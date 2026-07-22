@@ -9,7 +9,7 @@ pool:
 variables:
   pythonVersion: '3.12'
   acrLoginServer: 'apacheapp.azurecr.io'
-  imageRepository: 'flask-app'
+  imageRepository: 'apacheapp'
   tag: '$(Build.BuildId)'
 
 stages:
