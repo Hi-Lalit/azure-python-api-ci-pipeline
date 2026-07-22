@@ -1,10 +1,11 @@
-version: "3.9"
-
 services:
 
   flask:
     build: .
     container_name: flask-app
+    expose:
+      - "5000"
+
   apache:
     image: httpd:2.4
     container_name: apache-server
@@ -13,7 +14,7 @@ services:
       - "8080:80"
 
     volumes:
-      - ./apache.conf:/usr/local/apache2/conf/httpd.conf
+      - ./apache.conf:/usr/local/apache2/conf/httpd.conf:ro
 
     depends_on:
       - flask
