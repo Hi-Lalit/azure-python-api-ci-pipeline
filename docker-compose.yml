@@ -1,7 +1,11 @@
+version: '3.8'
+
 services:
 
   flask:
     build: .
+    # Uses the repository name. The pipeline will swap the ':latest' tag out during runtime.
+    image: apacheapp.azurecr.io/apacheapp:latest
     container_name: flask-app
     expose:
       - "5000"
@@ -9,12 +13,9 @@ services:
   apache:
     image: httpd:2.4
     container_name: apache-server
-
     ports:
       - "8080:80"
-
     volumes:
       - ./apache.conf:/usr/local/apache2/conf/httpd.conf:ro
-
     depends_on:
       - flask

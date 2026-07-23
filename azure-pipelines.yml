@@ -8,24 +8,24 @@ pool:
 
 variables:
   pythonVersion: '3.12'
+  # Name from Azure DevOps Project Settings -> Service Connections
+  acrServiceConnection: 'YourAzureServiceConnectionName' 
   acrLoginServer: 'apacheapp.azurecr.io'
   imageRepository: 'apacheapp'
   tag: '$(Build.BuildId)'
+  # Name of your Azure App Service for Containers
+  webAppName: 'YourAzureWebAppName'                     
 
 stages:
 
 # ============================================================
-# CI: Build and Test
+# CI: Build, Test, and Package Configurations
 # ============================================================
-
 - stage: Build_And_Test
   displayName: 'Build & Test'
-
   jobs:
   - job: Build
-
     steps:
-
     - task: UsePythonVersion@0
       displayName: 'Use Python $(pythonVersion)'
       inputs:
@@ -40,90 +40,77 @@ stages:
         python -m py_compile app.py
       displayName: 'Compile Python code'
 
+    # Build and tag specifically for ACR format
     - script: |
-        docker compose build
-      displayName: 'Build Docker images'
+        docker build -t $(acrLoginServer)/$(imageRepository):$(tag) -t $(acrLoginServer)/$(imageRepository):latest .
+      displayName: 'Build Docker Image for ACR'
 
-    # - script: |
-    #     set -e
+    # Prepares docker-compose and apache.conf so they can pass to the CD Deployment stage
+    - task: CopyFiles@2
+      displayName: 'Copy Docker & Apache Configuration Artifacts'
+      inputs:
+        Contents: |
+          docker-compose.yml
+          apache.conf
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
 
-    #     docker compose up -d
-
-    #     echo "Waiting for containers to start..."
-    #     sleep 10
-
-    #     echo "Testing Apache reverse proxy..."
-    #     curl --fail http://127.0.0.1:8080
-
-    #     echo "Integration test successful"
-
-    #     docker compose down
-    #   displayName: 'Integration test via Docker Compose'
-
-    - script: |
-        docker compose down || true
-      displayName: 'Cleanup Docker containers'
-      condition: always()
-
+    # Publishes the config files to Azure DevOps cloud storage
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Deployment Configurations'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
 
 # ============================================================
-# CD: Build and Push Flask Image to ACR
+# CD: Push Flask Image to ACR
 # ============================================================
-
 - stage: Push_Image
   displayName: 'Push Image to ACR'
-
   dependsOn: Build_And_Test
-
   condition: succeeded()
-
   jobs:
-  - job: PushToACR
-
+  - job: Push
     steps:
-
     - task: Docker@2
-      displayName: 'Build and Push Flask Image to ACR'
-
+      displayName: 'Login to ACR'
       inputs:
-        containerRegistry: 'apacheapp-azure-connection'
-        repository: '$(imageRepository)'
-        command: 'buildAndPush'
-        Dockerfile: '**/Dockerfile'
+        command: login
+        containerRegistry: '$(acrServiceConnection)'
 
-        tags: |
-          $(tag)
-          latest
-
+    - script: |
+        docker push $(acrLoginServer)/$(imageRepository):$(tag)
+        docker push $(acrLoginServer)/$(imageRepository):latest
+      displayName: 'Push Image to ACR'
 
 # ============================================================
-# CD: Deploy Image to Azure Web App
+# CD: Multi-Container Deploy to Azure Web App
 # ============================================================
-
 - stage: Deploy
-  displayName: 'Deploy to Azure Web App'
-
+  displayName: 'Deploy Multi-Container App'
   dependsOn: Push_Image
-
   condition: succeeded()
-
   jobs:
   - deployment: DeployWebApp
-
-    displayName: 'Deploy Flask Container'
-
-    environment: 'production'
-
+    displayName: 'Deploy Web App'
+    environment: 'production' # Track history inside Azure DevOps Environments
     strategy:
       runOnce:
         deploy:
-
           steps:
-
-          - task: AzureWebAppContainer@1
-            displayName: 'Deploy Image to Web App'
-
+          # Pulls the docker-compose & apache.conf configuration assets saved during CI
+          - task: DownloadBuildArtifacts@0
+            displayName: 'Download Deployment Configurations'
             inputs:
-              azureSubscription: 'apacheapp-arm-connection'
-              appName: 'apacheapp-webapp'
-              containers: '$(acrLoginServer)/$(imageRepository):$(tag)'
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'drop'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          # Updates Azure with your multi-container topology
+          - task: AzureWebAppContainer@1
+            displayName: 'Azure Web App Multi-Container Deploy'
+            inputs:
+              azureSubscription: '$(acrServiceConnection)'
+              appName: '$(webAppName)'
+              multicontainerConfigFile: '$(System.ArtifactsDirectory)/drop/docker-compose.yml'
